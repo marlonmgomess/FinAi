@@ -4,10 +4,11 @@ import { HashRouter, Routes, Route, Navigate } from 'react-router-dom';
 import Dashboard from './components/Dashboard';
 import ChatAssistant from './components/ChatAssistant';
 import TransactionList from './components/TransactionList';
+import Boxes from './components/Boxes';
 import Navbar from './components/Navbar';
 import { storageService } from './services/storage';
 import { notificationService } from './services/notifications';
-import { Transaction } from './types';
+import { Transaction, AIProcessedTransaction, Box } from './types';
 
 const App: React.FC = () => {
   const [transactions, setTransactions] = useState<Transaction[]>([]);
@@ -18,38 +19,42 @@ const App: React.FC = () => {
     const data = await storageService.getTransactions();
     setTransactions(data);
     setLoading(false);
-    
-    // Verificar se há lembretes pendentes para as transações carregadas
     notificationService.checkDueReminders(data);
   };
 
   useEffect(() => {
     fetchTransactions();
-    // Solicitar permissão de notificação silenciosamente se possível
-    if ("Notification" in window && Notification.permission === "default") {
-      // Deixamos para o ChatAssistant pedir no momento certo para melhor UX
-    }
   }, []);
 
-  const handleAddTransaction = async (t: Omit<Transaction, 'id' | 'createdAt'>) => {
-    const newTx = await storageService.saveTransaction(t);
-    await fetchTransactions();
-    
-    // Se tiver vencimento, agenda o lembrete
-    if (newTx.dataVencimento) {
-      notificationService.scheduleReminder(newTx);
+  const handleConfirmAction = async (data: any) => {
+    if (data.tipo === 'criar_caixinha') {
+      await storageService.saveBox({
+        nome: data.boxNome,
+        meta: data.meta,
+        emoji: data.emoji || '💰'
+      });
+    } else {
+      // É uma transação normal ou de caixinha
+      const boxes = await storageService.getBoxes();
+      const targetBox = boxes.find(b => b.nome.toLowerCase() === data.boxNome?.toLowerCase());
+      
+      await storageService.saveTransaction({
+        tipo: data.tipo,
+        valor: data.valor,
+        categoria: targetBox ? 'Investimento' : data.categoria,
+        data: data.data || new Date().toISOString().split('T')[0],
+        descricao: data.descricao,
+        dataVencimento: data.dataVencimento,
+        boxId: targetBox?.id
+      });
     }
-  };
-
-  const handleDeleteTransaction = async (id: string) => {
-    await storageService.deleteTransaction(id);
     await fetchTransactions();
   };
 
   return (
     <HashRouter>
       <div className="min-h-screen flex flex-col bg-slate-50">
-        <header className="bg-white border-b border-slate-200 sticky top-0 z-10 p-4">
+        <header className="bg-white border-b border-slate-200 sticky top-0 z-30 p-4">
           <div className="max-w-2xl mx-auto flex justify-between items-center">
             <div className="flex items-center gap-2">
               <div className="w-8 h-8 bg-emerald-500 rounded-lg flex items-center justify-center text-white font-bold">F</div>
@@ -69,8 +74,9 @@ const App: React.FC = () => {
           ) : (
             <Routes>
               <Route path="/" element={<Dashboard transactions={transactions} />} />
-              <Route path="/chat" element={<ChatAssistant transactions={transactions} onConfirm={handleAddTransaction} />} />
-              <Route path="/history" element={<TransactionList transactions={transactions} onDelete={handleDeleteTransaction} />} />
+              <Route path="/chat" element={<ChatAssistant transactions={transactions} onConfirm={handleConfirmAction} />} />
+              <Route path="/history" element={<TransactionList transactions={transactions} onDelete={storageService.deleteTransaction} />} />
+              <Route path="/boxes" element={<Boxes />} />
               <Route path="*" element={<Navigate to="/" />} />
             </Routes>
           )}

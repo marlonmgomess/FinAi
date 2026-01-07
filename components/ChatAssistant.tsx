@@ -1,13 +1,13 @@
 
 import React, { useState, useRef, useEffect, useCallback } from 'react';
-import { Send, Mic, MicOff, Check, X, Bot, User, Calendar, Clock, Tag, Headset, Sparkles, Bell } from 'lucide-react';
+import { Send, Mic, MicOff, Check, X, Bot, User, Calendar, Clock, Tag, Headset, Sparkles, Bell, Target, ArrowRightLeft, Landmark } from 'lucide-react';
 import { processFinancialInput } from '../services/gemini';
 import { notificationService } from '../services/notifications';
 import { Message, AIProcessedTransaction, TransactionType, Transaction } from '../types';
 
 interface ChatAssistantProps {
   transactions: Transaction[];
-  onConfirm: (transaction: AIProcessedTransaction) => void;
+  onConfirm: (data: any) => void;
 }
 
 const COMMON_CATEGORIES = [
@@ -15,47 +15,12 @@ const COMMON_CATEGORIES = [
   'Moradia', 'Salário', 'Investimentos', 'Contas Fixas', 'Outros'
 ];
 
-const playCue = (type: 'start' | 'stop' | 'toggle') => {
-  try {
-    const AudioContextClass = window.AudioContext || (window as any).webkitAudioContext;
-    if (!AudioContextClass) return;
-    const ctx = new AudioContextClass();
-    const osc = ctx.createOscillator();
-    const gain = ctx.createGain();
-    osc.connect(gain);
-    gain.connect(ctx.destination);
-    const now = ctx.currentTime;
-    if (type === 'start') {
-      osc.frequency.setValueAtTime(880, now);
-      gain.gain.setValueAtTime(0, now);
-      gain.gain.linearRampToValueAtTime(0.05, now + 0.05);
-      gain.gain.linearRampToValueAtTime(0, now + 0.15);
-      osc.start(now); osc.stop(now + 0.15);
-    } else if (type === 'stop') {
-      osc.frequency.setValueAtTime(440, now);
-      gain.gain.setValueAtTime(0, now);
-      gain.gain.linearRampToValueAtTime(0.05, now + 0.05);
-      gain.gain.linearRampToValueAtTime(0, now + 0.2);
-      osc.start(now); osc.stop(now + 0.2);
-    } else if (type === 'toggle') {
-      osc.type = 'triangle';
-      osc.frequency.setValueAtTime(660, now);
-      gain.gain.setValueAtTime(0, now);
-      gain.gain.linearRampToValueAtTime(0.05, now + 0.05);
-      gain.gain.linearRampToValueAtTime(0.01, now + 0.1);
-      gain.gain.linearRampToValueAtTime(0.05, now + 0.15);
-      gain.gain.linearRampToValueAtTime(0, now + 0.25);
-      osc.start(now); osc.stop(now + 0.25);
-    }
-  } catch (e) {}
-};
-
 const ChatAssistant: React.FC<ChatAssistantProps> = ({ transactions, onConfirm }) => {
   const [messages, setMessages] = useState<Message[]>([
     {
       id: '1',
       role: 'assistant',
-      content: 'Olá! Sou seu assistente FinAI. Posso registrar seus gastos ou conversar sobre como economizar. O que vamos fazer hoje?',
+      content: 'Olá! Sou seu assistente FinAI. Posso registrar gastos, ganhos ou gerenciar suas Caixinhas de Investimento. O que vamos fazer?',
       timestamp: Date.now()
     }
   ]);
@@ -65,16 +30,13 @@ const ChatAssistant: React.FC<ChatAssistantProps> = ({ transactions, onConfirm }
   const [isProcessing, setIsProcessing] = useState(false);
   const scrollRef = useRef<HTMLDivElement>(null);
   const recognitionRef = useRef<any>(null);
-  const [editingTransaction, setEditingTransaction] = useState<{id: string, data: AIProcessedTransaction} | null>(null);
+  const [editingAction, setEditingAction] = useState<{id: string, data: any} | null>(null);
 
   useEffect(() => {
     if (scrollRef.current) scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
   }, [messages, isProcessing]);
 
-  useEffect(() => {
-    // Ao abrir o chat, solicita permissão de notificação para garantir os lembretes
-    notificationService.requestPermission();
-  }, []);
+  useEffect(() => { notificationService.requestPermission(); }, []);
 
   const handleSendMessage = useCallback(async (text?: string) => {
     const content = text || inputValue.trim();
@@ -91,74 +53,54 @@ const ChatAssistant: React.FC<ChatAssistantProps> = ({ transactions, onConfirm }
     if (result) {
       const assistantMsgId = (Date.now() + 1).toString();
       if (result.transaction) {
-        const assistantMsg: Message = {
+        let label = "transação";
+        if (result.transaction.tipo === 'criar_caixinha') label = "nova caixinha";
+        else if (result.transaction.tipo === TransactionType.TRANSFER_TO_BOX) label = "investimento";
+
+        setMessages(prev => [...prev, {
           id: assistantMsgId,
           role: 'assistant',
-          content: `Entendido! Verifique os detalhes para registrar esta ${result.transaction.tipo}:`,
+          content: `Entendido! Verifique os detalhes para confirmar:`,
           timestamp: Date.now(),
           pendingTransaction: result.transaction
-        };
-        setMessages(prev => [...prev, assistantMsg]);
-        setEditingTransaction({ id: assistantMsgId, data: { ...result.transaction } });
+        }]);
+        setEditingAction({ id: assistantMsgId, data: result.transaction });
       } else if (result.advice) {
-        const assistantMsg: Message = {
+        setMessages(prev => [...prev, {
           id: assistantMsgId,
           role: 'assistant',
           content: result.advice,
           timestamp: Date.now()
-        };
-        setMessages(prev => [...prev, assistantMsg]);
+        }]);
       }
-    } else {
-      setMessages(prev => [...prev, {
-        id: Date.now().toString(),
-        role: 'assistant',
-        content: 'Desculpe, não consegui processar isso. Pode repetir?',
-        timestamp: Date.now()
-      }]);
     }
   }, [inputValue, transactions]);
 
+  // Speech logic
   useEffect(() => {
     if (!('webkitSpeechRecognition' in window)) return;
     const recognition = new (window as any).webkitSpeechRecognition();
     recognition.lang = 'pt-BR';
     recognition.continuous = true;
-    recognition.interimResults = true;
-    recognition.onstart = () => { setIsListening(true); playCue('start'); };
-    recognition.onend = () => {
-      setIsListening(false);
-      playCue('stop');
-      if (isHandsFree) { try { recognition.start(); } catch (e) {} }
-    };
-    recognition.onresult = (event: any) => {
-      let interim = '', final = '';
-      for (let i = event.resultIndex; i < event.results.length; ++i) {
-        if (event.results[i].isFinal) final += event.results[i][0].transcript;
-        else interim += event.results[i][0].transcript;
-      }
+    recognition.onstart = () => setIsListening(true);
+    recognition.onend = () => setIsListening(false);
+    recognition.onresult = (e: any) => {
+      const final = Array.from(e.results).filter((r:any) => r.isFinal).map((r:any) => r[0].transcript).join('');
       if (final) handleSendMessage(final);
-      else if (interim) setInputValue(interim);
     };
     recognitionRef.current = recognition;
-    return () => recognition.stop();
-  }, [isHandsFree, handleSendMessage]);
+  }, [handleSendMessage]);
 
-  const updateEditingData = (field: keyof AIProcessedTransaction, value: any) => {
-    if (!editingTransaction) return;
-    setEditingTransaction({ ...editingTransaction, data: { ...editingTransaction.data, [field]: value } });
+  const updateActionData = (field: string, value: any) => {
+    if (!editingAction) return;
+    setEditingAction({ ...editingAction, data: { ...editingAction.data, [field]: value } });
   };
 
-  const confirmTransaction = (messageId: string) => {
-    if (editingTransaction && editingTransaction.id === messageId) {
-      onConfirm(editingTransaction.data);
-      
-      const successMsg = editingTransaction.data.dataVencimento 
-        ? 'Registrado! Vou te avisar um dia antes do vencimento. 🔔' 
-        : 'Registrado com sucesso! ✅';
-
-      setMessages(prev => prev.map(m => m.id === messageId ? { ...m, pendingTransaction: undefined, content: successMsg } : m));
-      setEditingTransaction(null);
+  const confirmAction = (messageId: string) => {
+    if (editingAction && editingAction.id === messageId) {
+      onConfirm(editingAction.data);
+      setMessages(prev => prev.map(m => m.id === messageId ? { ...m, pendingTransaction: undefined, content: 'Ação realizada com sucesso! ✨' } : m));
+      setEditingAction(null);
     }
   };
 
@@ -169,12 +111,6 @@ const ChatAssistant: React.FC<ChatAssistantProps> = ({ transactions, onConfirm }
           <Sparkles size={16} className="text-emerald-500" />
           <span className="text-sm font-semibold text-slate-700">Assistente FinAI</span>
         </div>
-        <button 
-          onClick={() => { setIsHandsFree(!isHandsFree); playCue('toggle'); if(!isHandsFree) recognitionRef.current?.start(); else recognitionRef.current?.stop(); }}
-          className={`flex items-center gap-1.5 px-3 py-1 rounded-full text-[10px] font-bold transition-all border ${isHandsFree ? 'bg-emerald-500 text-white border-emerald-500 shadow-md' : 'bg-white text-slate-400 border-slate-200'}`}
-        >
-          <Headset size={14} /> {isHandsFree ? 'ATIVADO' : 'MÃOS LIVRES'}
-        </button>
       </div>
 
       <div ref={scrollRef} className="flex-1 overflow-y-auto p-4 space-y-4 chat-scroll">
@@ -185,69 +121,58 @@ const ChatAssistant: React.FC<ChatAssistantProps> = ({ transactions, onConfirm }
                 {msg.role === 'user' ? <User size={16} /> : <Bot size={18} />}
               </div>
               <div className="space-y-2">
-                <div className={`p-3 rounded-2xl text-sm leading-relaxed ${msg.role === 'user' ? 'bg-emerald-600 text-white rounded-tr-none shadow-sm' : 'bg-slate-100 text-slate-800 rounded-tl-none border border-slate-200/50 shadow-sm'}`}>
+                <div className={`p-3 rounded-2xl text-sm leading-relaxed shadow-sm ${msg.role === 'user' ? 'bg-emerald-600 text-white' : 'bg-slate-100 text-slate-800'}`}>
                   {msg.content}
                 </div>
-                {msg.pendingTransaction && editingTransaction && editingTransaction.id === msg.id && (
-                  <div className="bg-gradient-to-br from-white via-white to-emerald-50/20 border border-slate-200 rounded-2xl p-4 shadow-lg space-y-4 w-full">
-                    <div className="grid grid-cols-2 gap-4 text-xs">
-                      <div>
-                        <label className="text-[10px] font-bold text-slate-500 uppercase mb-1 block">Tipo</label>
-                        <select value={editingTransaction.data.tipo} onChange={e => updateEditingData('tipo', e.target.value)} className="w-full bg-slate-50 border border-slate-200 rounded-xl px-2 py-1.5 font-bold appearance-none">
-                          <option value={TransactionType.EXPENSE}>Despesa</option>
-                          <option value={TransactionType.INCOME}>Receita</option>
-                        </select>
-                      </div>
-                      <div>
-                        <label className="text-[10px] font-bold text-slate-500 uppercase mb-1 block">Valor</label>
-                        <input type="number" value={editingTransaction.data.valor} onChange={e => updateEditingData('valor', parseFloat(e.target.value))} className="w-full bg-slate-50 border border-slate-200 rounded-xl px-2 py-1.5 font-bold"/>
-                      </div>
-                      <div className="col-span-2">
-                        <label className="text-[10px] font-bold text-slate-500 uppercase mb-1 block">Descrição</label>
-                        <input type="text" value={editingTransaction.data.descricao} onChange={e => updateEditingData('descricao', e.target.value)} className="w-full bg-slate-50 border border-slate-200 rounded-xl px-2 py-1.5 font-semibold"/>
-                      </div>
-                      <div className="col-span-2">
-                        <label className="text-[10px] font-bold text-slate-500 uppercase mb-1 block">Categoria</label>
-                        <div className="flex flex-wrap gap-1 mb-2">
-                          {COMMON_CATEGORIES.slice(0, 5).map(cat => (
-                            <button key={cat} onClick={() => updateEditingData('categoria', cat)} className={`px-2 py-1 rounded-full border text-[10px] transition-colors ${editingTransaction.data.categoria === cat ? 'bg-emerald-500 text-white border-emerald-500' : 'bg-white text-slate-500 border-slate-200'}`}>
-                              {cat}
-                            </button>
-                          ))}
-                        </div>
-                        <input list="cat-list" value={editingTransaction.data.categoria} onChange={e => updateEditingData('categoria', e.target.value)} className="w-full bg-slate-50 border border-slate-200 rounded-xl px-2 py-1.5 font-semibold" placeholder="Ou digite..."/>
-                        <datalist id="cat-list">{COMMON_CATEGORIES.map(c => <option key={c} value={c}/>)}</datalist>
-                      </div>
-                      <div className="col-span-1">
-                        <label className="text-[10px] font-bold text-slate-500 uppercase mb-1 block flex items-center gap-1"><Clock size={10}/> Data</label>
-                        <input 
-                          type="date" 
-                          value={editingTransaction.data.data} 
-                          onChange={e => updateEditingData('data', e.target.value)} 
-                          className="w-full bg-slate-50 border border-slate-200 rounded-xl px-2 py-1.5 text-slate-700 focus:ring-1 focus:ring-emerald-500"
-                        />
-                      </div>
-                      <div className="col-span-1">
-                        <label className="text-[10px] font-bold text-slate-500 uppercase mb-1 block flex items-center gap-1"><Calendar size={10}/> Vencimento (Opc.)</label>
-                        <input 
-                          type="date" 
-                          value={editingTransaction.data.dataVencimento || ''} 
-                          onChange={e => updateEditingData('dataVencimento', e.target.value)} 
-                          className="w-full bg-slate-50 border border-slate-200 rounded-xl px-2 py-1.5 text-slate-700 focus:ring-1 focus:ring-emerald-500"
-                        />
-                      </div>
+                
+                {msg.pendingTransaction && editingAction?.id === msg.id && (
+                  <div className="bg-white border-2 border-emerald-100 rounded-2xl p-4 shadow-xl space-y-4 w-full animate-in zoom-in-95 duration-200">
+                    <div className="flex items-center gap-2 mb-2">
+                       {editingAction.data.tipo === 'criar_caixinha' ? <Target className="text-emerald-500" /> : <ArrowRightLeft className="text-blue-500" />}
+                       <span className="text-xs font-black uppercase text-slate-400">Confirmar Ação</span>
                     </div>
 
-                    {editingTransaction.data.dataVencimento && (
-                      <div className="flex items-center gap-2 p-2 bg-amber-50 rounded-lg border border-amber-100">
-                        <Bell size={14} className="text-amber-600" />
-                        <span className="text-[10px] text-amber-700 font-medium italic">Lembrete automático agendado para 24h antes.</span>
-                      </div>
-                    )}
+                    <div className="grid grid-cols-2 gap-3 text-xs">
+                      {editingAction.data.tipo === 'criar_caixinha' ? (
+                        <>
+                          <div className="col-span-2">
+                            <label className="text-[10px] font-bold text-slate-500 uppercase mb-1 block">Nome da Caixinha</label>
+                            <input value={editingAction.data.boxNome} onChange={e => updateActionData('boxNome', e.target.value)} className="w-full bg-slate-50 border rounded-xl p-2 font-bold focus:ring-1 focus:ring-emerald-500 outline-none"/>
+                          </div>
+                          <div>
+                            <label className="text-[10px] font-bold text-slate-500 uppercase mb-1 block">Meta (R$)</label>
+                            <input type="number" value={editingAction.data.meta} onChange={e => updateActionData('meta', parseFloat(e.target.value))} className="w-full bg-slate-50 border rounded-xl p-2 font-bold text-emerald-600 outline-none"/>
+                          </div>
+                          <div>
+                            <label className="text-[10px] font-bold text-slate-500 uppercase mb-1 block">Banco</label>
+                            <input value={editingAction.data.banco || ''} onChange={e => updateActionData('banco', e.target.value)} placeholder="Opcional" className="w-full bg-slate-50 border rounded-xl p-2 font-bold text-slate-600 outline-none"/>
+                          </div>
+                          <div className="col-span-2">
+                            <label className="text-[10px] font-bold text-slate-500 uppercase mb-1 block">Emoji Sugerido</label>
+                            <input value={editingAction.data.emoji} onChange={e => updateActionData('emoji', e.target.value)} className="w-full bg-slate-50 border rounded-xl p-2 text-center text-lg outline-none"/>
+                          </div>
+                        </>
+                      ) : (
+                        <>
+                          <div className="col-span-2">
+                            <label className="text-[10px] font-bold text-slate-500 uppercase mb-1 block">Descrição</label>
+                            <input value={editingAction.data.descricao} onChange={e => updateActionData('descricao', e.target.value)} className="w-full bg-slate-50 border rounded-xl p-2 font-bold outline-none"/>
+                          </div>
+                          <div>
+                            <label className="text-[10px] font-bold text-slate-500 uppercase mb-1 block">Valor (R$)</label>
+                            <input type="number" value={editingAction.data.valor} onChange={e => updateActionData('valor', parseFloat(e.target.value))} className="w-full bg-slate-50 border rounded-xl p-2 font-bold text-blue-600 outline-none"/>
+                          </div>
+                          <div>
+                            <label className="text-[10px] font-bold text-slate-500 uppercase mb-1 block">Destino</label>
+                            <input value={editingAction.data.boxNome || 'Saldo Livre'} onChange={e => updateActionData('boxNome', e.target.value)} className="w-full bg-slate-50 border rounded-xl p-2 font-bold text-slate-600 outline-none" readOnly/>
+                          </div>
+                        </>
+                      )}
+                    </div>
 
-                    <div className="flex gap-3">
-                      <button onClick={() => confirmTransaction(msg.id)} className="flex-1 bg-emerald-600 text-white py-2.5 rounded-xl flex items-center justify-center gap-2 text-xs font-bold shadow-md"><Check size={16}/> Salvar</button>
-                      <button onClick={() => setEditingTransaction(null)} className="flex-1 bg-slate-100 text-slate-500 py-2.5 rounded-xl flex items-center justify-center gap-2 text-xs font-bold"><X size={16}/> Cancelar</button>
+                    <div className="flex gap-2 pt-2">
+                      <button onClick={() => confirmAction(msg.id)} className="flex-1 bg-emerald-600 text-white py-2.5 rounded-xl font-bold text-xs shadow-lg flex items-center justify-center gap-2 transition-transform active:scale-95"><Check size={14}/> Confirmar</button>
+                      <button onClick={() => setEditingAction(null)} className="flex-1 bg-slate-100 text-slate-500 py-2.5 rounded-xl font-bold text-xs transition-transform active:scale-95">Cancelar</button>
                     </div>
                   </div>
                 )}
@@ -255,17 +180,27 @@ const ChatAssistant: React.FC<ChatAssistantProps> = ({ transactions, onConfirm }
             </div>
           </div>
         ))}
-        {isProcessing && <div className="flex gap-2"><div className="w-8 h-8 rounded-full bg-blue-100 text-blue-600 flex items-center justify-center"><Bot size={18}/></div><div className="bg-slate-100 p-3 rounded-2xl animate-pulse">Pensando...</div></div>}
+        {isProcessing && <div className="flex gap-2 items-center text-slate-400 text-xs animate-pulse"><Bot size={16}/> FinAI está processando...</div>}
       </div>
 
       <div className="p-4 bg-slate-50 border-t border-slate-200">
         <div className="flex items-center gap-2">
-          <button onClick={() => isListening ? recognitionRef.current.stop() : recognitionRef.current.start()} className={`w-12 h-12 rounded-full flex items-center justify-center shadow-md ${isListening ? 'bg-rose-500 text-white' : 'bg-white text-slate-400 border border-slate-200'}`}>
+          <button 
+            onClick={() => isListening ? recognitionRef.current?.stop() : recognitionRef.current?.start()} 
+            className={`w-12 h-12 rounded-full flex items-center justify-center shadow-md transition-colors ${isListening ? 'bg-rose-500 text-white animate-pulse' : 'bg-white text-slate-400 border border-slate-200'}`}
+          >
             {isListening ? <MicOff size={22}/> : <Mic size={22}/>}
           </button>
           <div className="flex-1 relative">
-            <input type="text" value={inputValue} onChange={e => setInputValue(e.target.value)} onKeyDown={e => e.key === 'Enter' && handleSendMessage()} placeholder="Pergunte algo ou registre um gasto..." className="w-full h-12 bg-white border border-slate-200 rounded-full px-5 pr-12 text-sm focus:ring-2 focus:ring-emerald-500/20 shadow-sm"/>
-            <button onClick={() => handleSendMessage()} className="absolute right-2 top-2 w-8 h-8 rounded-full bg-emerald-600 text-white flex items-center justify-center"><Send size={16}/></button>
+            <input 
+              type="text" 
+              value={inputValue} 
+              onChange={e => setInputValue(e.target.value)} 
+              onKeyDown={e => e.key === 'Enter' && handleSendMessage()} 
+              placeholder="Guardar 500 reais na Reserva no Nubank..." 
+              className="w-full h-12 bg-white border border-slate-200 rounded-full px-5 text-sm focus:ring-2 focus:ring-emerald-500/20 shadow-sm outline-none"
+            />
+            <button onClick={() => handleSendMessage()} className="absolute right-2 top-2 w-8 h-8 rounded-full bg-emerald-600 text-white flex items-center justify-center shadow-md hover:bg-emerald-700 transition-colors"><Send size={16}/></button>
           </div>
         </div>
       </div>
