@@ -9,7 +9,7 @@ import Settings from './components/Settings';
 import Navbar from './components/Navbar';
 import { storageService } from './services/storage';
 import { notificationService } from './services/notifications';
-import { Transaction } from './types';
+import { Transaction, TransactionType } from './types';
 
 const App: React.FC = () => {
   const [transactions, setTransactions] = useState<Transaction[]>([]);
@@ -17,10 +17,13 @@ const App: React.FC = () => {
 
   const fetchTransactions = async () => {
     setLoading(true);
-    const data = await storageService.getTransactions();
-    setTransactions(data);
-    setLoading(false);
-    notificationService.checkDueReminders(data);
+    try {
+      const data = await storageService.getTransactions();
+      setTransactions(data);
+      notificationService.checkDueReminders(data);
+    } finally {
+      setLoading(false);
+    }
   };
 
   useEffect(() => {
@@ -28,10 +31,12 @@ const App: React.FC = () => {
   }, []);
 
   const handleConfirmAction = async (data: any) => {
+    if (!data) return;
+
     if (data.tipo === 'criar_caixinha') {
       const result = await storageService.saveBox({
-        nome: data.boxNome,
-        meta: data.meta,
+        nome: data.boxNome || 'Nova Caixinha',
+        meta: data.meta || 0,
         emoji: data.emoji || '💰',
         banco: data.banco
       });
@@ -43,12 +48,15 @@ const App: React.FC = () => {
       const boxes = await storageService.getBoxes();
       const targetBox = boxes.find(b => b.nome.toLowerCase() === data.boxNome?.toLowerCase());
       
+      // Validação de segurança para garantir que apareça no extrato
+      const tipo = data.tipo === 'receita' ? TransactionType.INCOME : TransactionType.EXPENSE;
+      
       await storageService.saveTransaction({
-        tipo: data.tipo,
-        valor: data.valor,
-        categoria: targetBox ? 'Investimento' : data.categoria,
+        tipo: tipo,
+        valor: data.valor || 0,
+        categoria: targetBox ? 'Investimento' : (data.categoria || 'Geral'),
         data: data.data || new Date().toISOString().split('T')[0],
-        descricao: data.descricao,
+        descricao: data.descricao || (tipo === TransactionType.INCOME ? 'Nova Receita' : 'Nova Despesa'),
         dataVencimento: data.dataVencimento,
         boxId: targetBox?.id
       });
@@ -80,7 +88,7 @@ const App: React.FC = () => {
             <Routes>
               <Route path="/" element={<Dashboard transactions={transactions} />} />
               <Route path="/chat" element={<ChatAssistant transactions={transactions} onConfirm={handleConfirmAction} />} />
-              <Route path="/history" element={<TransactionList transactions={transactions} onDelete={storageService.deleteTransaction} />} />
+              <Route path="/history" element={<TransactionList transactions={transactions} onDelete={async (id) => { await storageService.deleteTransaction(id); await fetchTransactions(); }} />} />
               <Route path="/boxes" element={<Boxes />} />
               <Route path="/settings" element={<Settings />} />
               <Route path="*" element={<Navigate to="/" />} />

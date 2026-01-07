@@ -3,7 +3,6 @@ import { GoogleGenAI, Modality, LiveServerMessage } from "@google/genai";
 import { Transaction, TransactionType } from "../types";
 import { storageService } from "./storage";
 
-// Utilitários de Áudio PCM
 export const audioUtils = {
   encode: (bytes: Uint8Array) => {
     let binary = '';
@@ -25,10 +24,22 @@ export const audioUtils = {
   }
 };
 
+const cleanJsonResponse = (text: string) => {
+  // Remove blocos de código markdown se existirem
+  const cleaned = text.replace(/```json/g, '').replace(/```/g, '').trim();
+  try {
+    return JSON.parse(cleaned);
+  } catch (e) {
+    console.error("Erro ao parsear JSON do Gemini:", cleaned);
+    return null;
+  }
+};
+
 const getSystemInstruction = (summary: string, boxes: string) => 
-`Você é o FinAI, assistente financeiro de voz. Saldo: ${summary}. Caixinhas: ${boxes}. 
-Seja breve, direto e amigável. Processe transações e responda dúvidas.
-Se o usuário gastar ou receber algo, confirme o valor e categoria.`;
+`Você é o FinAI, assistente financeiro. Saldo: ${summary}. Caixinhas: ${boxes}. 
+Processe comandos financeiros. RESPONDA APENAS EM JSON VÁLIDO.
+Se o usuário registrar algo, preencha todos os campos.
+Estrutura: {"advice": "Mensagem amigável", "transaction": {"tipo": "despesa"|"receita", "valor": 0, "descricao": "...", "categoria": "..."}}`;
 
 export const connectLiveAssistant = async (
   history: Transaction[],
@@ -87,7 +98,7 @@ export const processFinancialInputStreaming = async (
       model: 'gemini-3-flash-preview',
       contents: input,
       config: {
-        systemInstruction: `FinAI: Saldo: ${summary}. Caixinhas: ${boxesList}. RESPONDA JSON. "advice" PRIMEIRO.`,
+        systemInstruction: `FinAI. Saldo: ${summary}. Caixinhas: ${boxesList}. RESPONDA JSON. "advice" PRIMEIRO. Tente sempre extrair "descricao" e "categoria".`,
         responseMimeType: "application/json",
         temperature: 0.1,
         thinkingConfig: { thinkingBudget: 0 }
@@ -102,8 +113,9 @@ export const processFinancialInputStreaming = async (
         if (match && match[1]) onChunk(match[1].replace(/\\n/g, '\n').replace(/\\"/g, '"'));
       }
     }
-    return JSON.parse(fullResponse.trim());
+    return cleanJsonResponse(fullResponse);
   } catch (error) {
+    console.error("Erro no processamento Gemini:", error);
     return null;
   }
 };
