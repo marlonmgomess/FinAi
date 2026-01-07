@@ -56,7 +56,7 @@ const App: React.FC = () => {
           ) : (
             <Routes>
               <Route path="/" element={<Dashboard transactions={transactions} />} />
-              <Route path="/chat" element={<ChatAssistant onConfirm={handleAddTransaction} />} />
+              <Route path="/chat" element={<ChatAssistant transactions={transactions} onConfirm={handleAddTransaction} />} />
               <Route path="/history" element={<TransactionList transactions={transactions} onDelete={handleDeleteTransaction} />} />
               <Route path="*" element={<Navigate to="/" />} />
             </Routes>
