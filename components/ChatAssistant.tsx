@@ -1,7 +1,7 @@
 
 import React, { useState, useRef, useEffect, useCallback } from 'react';
-import { Send, Mic, MicOff, Check, X, Bot, User, Calendar, Clock, Tag, Headset, Sparkles, Bell, Target, ArrowRightLeft, Landmark } from 'lucide-react';
-import { processFinancialInput } from '../services/gemini';
+import { Send, Mic, MicOff, Check, X, Bot, User, Sparkles, Target, ArrowRightLeft } from 'lucide-react';
+import { processFinancialInputStreaming } from '../services/gemini';
 import { notificationService } from '../services/notifications';
 import { Message, AIProcessedTransaction, TransactionType, Transaction } from '../types';
 
@@ -10,23 +10,17 @@ interface ChatAssistantProps {
   onConfirm: (data: any) => void;
 }
 
-const COMMON_CATEGORIES = [
-  'Alimentação', 'Transporte', 'Lazer', 'Saúde', 'Educação', 
-  'Moradia', 'Salário', 'Investimentos', 'Contas Fixas', 'Outros'
-];
-
 const ChatAssistant: React.FC<ChatAssistantProps> = ({ transactions, onConfirm }) => {
   const [messages, setMessages] = useState<Message[]>([
     {
       id: '1',
       role: 'assistant',
-      content: 'Olá! Sou seu assistente FinAI. Posso registrar gastos, ganhos ou gerenciar suas Caixinhas de Investimento. O que vamos fazer?',
+      content: 'Olá! Sou seu assistente FinAI. Como posso ajudar com suas finanças hoje?',
       timestamp: Date.now()
     }
   ]);
   const [inputValue, setInputValue] = useState('');
   const [isListening, setIsListening] = useState(false);
-  const [isHandsFree, setIsHandsFree] = useState(false);
   const [isProcessing, setIsProcessing] = useState(false);
   const scrollRef = useRef<HTMLDivElement>(null);
   const recognitionRef = useRef<any>(null);
@@ -46,32 +40,44 @@ const ChatAssistant: React.FC<ChatAssistantProps> = ({ transactions, onConfirm }
     const userMsg: Message = { id: Date.now().toString(), role: 'user', content, timestamp: Date.now() };
     setMessages(prev => [...prev, userMsg]);
 
+    const assistantMsgId = (Date.now() + 1).toString();
+    // Mensagem inicial vazia do assistente para o streaming
+    setMessages(prev => [...prev, {
+      id: assistantMsgId,
+      role: 'assistant',
+      content: '',
+      timestamp: Date.now()
+    }]);
+
     setIsProcessing(true);
-    const result = await processFinancialInput(content, transactions);
+    
+    const result = await processFinancialInputStreaming(
+      content, 
+      transactions,
+      (streamedText) => {
+        // Update the message content as chunks arrive
+        setMessages(prev => prev.map(m => 
+          m.id === assistantMsgId ? { ...m, content: streamedText } : m
+        ));
+      }
+    );
+
     setIsProcessing(false);
 
     if (result) {
-      const assistantMsgId = (Date.now() + 1).toString();
       if (result.transaction) {
-        let label = "transação";
-        if (result.transaction.tipo === 'criar_caixinha') label = "nova caixinha";
-        else if (result.transaction.tipo === TransactionType.TRANSFER_TO_BOX) label = "investimento";
-
-        setMessages(prev => [...prev, {
-          id: assistantMsgId,
-          role: 'assistant',
-          content: `Entendido! Verifique os detalhes para confirmar:`,
-          timestamp: Date.now(),
-          pendingTransaction: result.transaction
-        }]);
+        setMessages(prev => prev.map(m => 
+          m.id === assistantMsgId ? { 
+            ...m, 
+            content: result.advice || m.content,
+            pendingTransaction: result.transaction 
+          } : m
+        ));
         setEditingAction({ id: assistantMsgId, data: result.transaction });
-      } else if (result.advice) {
-        setMessages(prev => [...prev, {
-          id: assistantMsgId,
-          role: 'assistant',
-          content: result.advice,
-          timestamp: Date.now()
-        }]);
+      } else {
+        setMessages(prev => prev.map(m => 
+          m.id === assistantMsgId ? { ...m, content: result.advice || m.content } : m
+        ));
       }
     }
   }, [inputValue, transactions]);
@@ -81,12 +87,12 @@ const ChatAssistant: React.FC<ChatAssistantProps> = ({ transactions, onConfirm }
     if (!('webkitSpeechRecognition' in window)) return;
     const recognition = new (window as any).webkitSpeechRecognition();
     recognition.lang = 'pt-BR';
-    recognition.continuous = true;
+    recognition.continuous = false;
     recognition.onstart = () => setIsListening(true);
     recognition.onend = () => setIsListening(false);
     recognition.onresult = (e: any) => {
-      const final = Array.from(e.results).filter((r:any) => r.isFinal).map((r:any) => r[0].transcript).join('');
-      if (final) handleSendMessage(final);
+      const transcript = e.results[0][0].transcript;
+      if (transcript) handleSendMessage(transcript);
     };
     recognitionRef.current = recognition;
   }, [handleSendMessage]);
@@ -99,7 +105,7 @@ const ChatAssistant: React.FC<ChatAssistantProps> = ({ transactions, onConfirm }
   const confirmAction = (messageId: string) => {
     if (editingAction && editingAction.id === messageId) {
       onConfirm(editingAction.data);
-      setMessages(prev => prev.map(m => m.id === messageId ? { ...m, pendingTransaction: undefined, content: 'Ação realizada com sucesso! ✨' } : m));
+      setMessages(prev => prev.map(m => m.id === messageId ? { ...m, pendingTransaction: undefined, content: 'Tudo pronto! Ação registrada com sucesso. ✨' } : m));
       setEditingAction(null);
     }
   };
@@ -108,8 +114,8 @@ const ChatAssistant: React.FC<ChatAssistantProps> = ({ transactions, onConfirm }
     <div className="flex flex-col h-[calc(100vh-10rem)] bg-white rounded-2xl border border-slate-200 overflow-hidden shadow-sm">
       <div className="bg-slate-50 px-4 py-3 border-b border-slate-200 flex items-center justify-between">
         <div className="flex items-center gap-2">
-          <Sparkles size={16} className="text-emerald-500" />
-          <span className="text-sm font-semibold text-slate-700">Assistente FinAI</span>
+          <Sparkles size={16} className="text-emerald-500 animate-pulse" />
+          <span className="text-sm font-semibold text-slate-700">FinAI Inteligente</span>
         </div>
       </div>
 
@@ -121,8 +127,8 @@ const ChatAssistant: React.FC<ChatAssistantProps> = ({ transactions, onConfirm }
                 {msg.role === 'user' ? <User size={16} /> : <Bot size={18} />}
               </div>
               <div className="space-y-2">
-                <div className={`p-3 rounded-2xl text-sm leading-relaxed shadow-sm ${msg.role === 'user' ? 'bg-emerald-600 text-white' : 'bg-slate-100 text-slate-800'}`}>
-                  {msg.content}
+                <div className={`p-3 rounded-2xl text-sm leading-relaxed shadow-sm min-h-[40px] ${msg.role === 'user' ? 'bg-emerald-600 text-white' : 'bg-slate-100 text-slate-800'}`}>
+                  {msg.content || (msg.role === 'assistant' && <span className="flex gap-1 items-center"><span className="w-1.5 h-1.5 bg-slate-400 rounded-full animate-bounce"></span><span className="w-1.5 h-1.5 bg-slate-400 rounded-full animate-bounce [animation-delay:0.2s]"></span><span className="w-1.5 h-1.5 bg-slate-400 rounded-full animate-bounce [animation-delay:0.4s]"></span></span>)}
                 </div>
                 
                 {msg.pendingTransaction && editingAction?.id === msg.id && (
@@ -137,7 +143,7 @@ const ChatAssistant: React.FC<ChatAssistantProps> = ({ transactions, onConfirm }
                         <>
                           <div className="col-span-2">
                             <label className="text-[10px] font-bold text-slate-500 uppercase mb-1 block">Nome da Caixinha</label>
-                            <input value={editingAction.data.boxNome} onChange={e => updateActionData('boxNome', e.target.value)} className="w-full bg-slate-50 border rounded-xl p-2 font-bold focus:ring-1 focus:ring-emerald-500 outline-none"/>
+                            <input value={editingAction.data.boxNome} onChange={e => updateActionData('boxNome', e.target.value)} className="w-full bg-slate-50 border rounded-xl p-2 font-bold outline-none"/>
                           </div>
                           <div>
                             <label className="text-[10px] font-bold text-slate-500 uppercase mb-1 block">Meta (R$)</label>
@@ -145,11 +151,7 @@ const ChatAssistant: React.FC<ChatAssistantProps> = ({ transactions, onConfirm }
                           </div>
                           <div>
                             <label className="text-[10px] font-bold text-slate-500 uppercase mb-1 block">Banco</label>
-                            <input value={editingAction.data.banco || ''} onChange={e => updateActionData('banco', e.target.value)} placeholder="Opcional" className="w-full bg-slate-50 border rounded-xl p-2 font-bold text-slate-600 outline-none"/>
-                          </div>
-                          <div className="col-span-2">
-                            <label className="text-[10px] font-bold text-slate-500 uppercase mb-1 block">Emoji Sugerido</label>
-                            <input value={editingAction.data.emoji} onChange={e => updateActionData('emoji', e.target.value)} className="w-full bg-slate-50 border rounded-xl p-2 text-center text-lg outline-none"/>
+                            <input value={editingAction.data.banco || ''} onChange={e => updateActionData('banco', e.target.value)} className="w-full bg-slate-50 border rounded-xl p-2 font-bold text-slate-600 outline-none"/>
                           </div>
                         </>
                       ) : (
@@ -164,7 +166,7 @@ const ChatAssistant: React.FC<ChatAssistantProps> = ({ transactions, onConfirm }
                           </div>
                           <div>
                             <label className="text-[10px] font-bold text-slate-500 uppercase mb-1 block">Destino</label>
-                            <input value={editingAction.data.boxNome || 'Saldo Livre'} onChange={e => updateActionData('boxNome', e.target.value)} className="w-full bg-slate-50 border rounded-xl p-2 font-bold text-slate-600 outline-none" readOnly/>
+                            <input value={editingAction.data.boxNome || 'Saldo Livre'} className="w-full bg-slate-50 border rounded-xl p-2 font-bold text-slate-400 outline-none" readOnly/>
                           </div>
                         </>
                       )}
@@ -172,7 +174,7 @@ const ChatAssistant: React.FC<ChatAssistantProps> = ({ transactions, onConfirm }
 
                     <div className="flex gap-2 pt-2">
                       <button onClick={() => confirmAction(msg.id)} className="flex-1 bg-emerald-600 text-white py-2.5 rounded-xl font-bold text-xs shadow-lg flex items-center justify-center gap-2 transition-transform active:scale-95"><Check size={14}/> Confirmar</button>
-                      <button onClick={() => setEditingAction(null)} className="flex-1 bg-slate-100 text-slate-500 py-2.5 rounded-xl font-bold text-xs transition-transform active:scale-95">Cancelar</button>
+                      <button onClick={() => setEditingAction(null)} className="flex-1 bg-slate-100 text-slate-500 py-2.5 rounded-xl font-bold text-xs">Cancelar</button>
                     </div>
                   </div>
                 )}
@@ -180,7 +182,6 @@ const ChatAssistant: React.FC<ChatAssistantProps> = ({ transactions, onConfirm }
             </div>
           </div>
         ))}
-        {isProcessing && <div className="flex gap-2 items-center text-slate-400 text-xs animate-pulse"><Bot size={16}/> FinAI está processando...</div>}
       </div>
 
       <div className="p-4 bg-slate-50 border-t border-slate-200">
@@ -195,12 +196,19 @@ const ChatAssistant: React.FC<ChatAssistantProps> = ({ transactions, onConfirm }
             <input 
               type="text" 
               value={inputValue} 
+              disabled={isProcessing}
               onChange={e => setInputValue(e.target.value)} 
               onKeyDown={e => e.key === 'Enter' && handleSendMessage()} 
-              placeholder="Guardar 500 reais na Reserva no Nubank..." 
-              className="w-full h-12 bg-white border border-slate-200 rounded-full px-5 text-sm focus:ring-2 focus:ring-emerald-500/20 shadow-sm outline-none"
+              placeholder="Digite sua transação..." 
+              className="w-full h-12 bg-white border border-slate-200 rounded-full px-5 text-sm focus:ring-2 focus:ring-emerald-500/20 shadow-sm outline-none disabled:bg-slate-50 disabled:text-slate-400"
             />
-            <button onClick={() => handleSendMessage()} className="absolute right-2 top-2 w-8 h-8 rounded-full bg-emerald-600 text-white flex items-center justify-center shadow-md hover:bg-emerald-700 transition-colors"><Send size={16}/></button>
+            <button 
+              disabled={isProcessing}
+              onClick={() => handleSendMessage()} 
+              className="absolute right-2 top-2 w-8 h-8 rounded-full bg-emerald-600 text-white flex items-center justify-center shadow-md hover:bg-emerald-700 transition-colors disabled:bg-slate-300"
+            >
+              <Send size={16}/>
+            </button>
           </div>
         </div>
       </div>
