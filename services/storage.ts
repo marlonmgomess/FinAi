@@ -1,5 +1,6 @@
 
 import { Transaction, TransactionType, Box, UserProfile } from '../types';
+import { generateId } from './gemini';
 
 const STORAGE_KEY = 'finai_transactions';
 const BOXES_KEY = 'finai_boxes';
@@ -33,7 +34,7 @@ export const storageService = {
     const transactions = await storageService.getTransactions();
     const newTransaction: Transaction = {
       ...transaction,
-      id: crypto.randomUUID(),
+      id: generateId(),
       createdAt: Date.now()
     };
     localStorage.setItem(STORAGE_KEY, JSON.stringify([newTransaction, ...transactions]));
@@ -80,7 +81,7 @@ export const storageService = {
       return { success: false, error: 'Limite de caixinhas atingido no plano grátis.' };
     }
 
-    const newBox: Box = { ...box, id: crypto.randomUUID(), saldo: 0, createdAt: Date.now() };
+    const newBox: Box = { ...box, id: generateId(), saldo: 0, createdAt: Date.now() };
     localStorage.setItem(BOXES_KEY, JSON.stringify([...boxes, newBox]));
     return { success: true, box: newBox };
   },

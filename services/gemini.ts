@@ -24,15 +24,26 @@ export const audioUtils = {
   }
 };
 
+// Gerador de ID robusto para mobile
+export const generateId = () => {
+  if (typeof crypto !== 'undefined' && crypto.randomUUID) return crypto.randomUUID();
+  return Math.random().toString(36).substring(2, 15) + Math.random().toString(36).substring(2, 15);
+};
+
 const cleanJsonResponse = (text: string) => {
-  // Remove blocos de código markdown se existirem
-  const cleaned = text.replace(/```json/g, '').replace(/```/g, '').trim();
-  try {
-    return JSON.parse(cleaned);
-  } catch (e) {
-    console.error("Erro ao parsear JSON do Gemini:", cleaned);
-    return null;
+  // Tenta encontrar o primeiro { e o último } para isolar o JSON
+  const start = text.indexOf('{');
+  const end = text.lastIndexOf('}');
+  
+  if (start !== -1 && end !== -1 && end > start) {
+    const jsonStr = text.substring(start, end + 1);
+    try {
+      return JSON.parse(jsonStr);
+    } catch (e) {
+      console.error("Erro ao parsear JSON extraído:", e);
+    }
   }
+  return null;
 };
 
 const getSystemInstruction = (summary: string, boxes: string) => 
@@ -98,7 +109,7 @@ export const processFinancialInputStreaming = async (
       model: 'gemini-3-flash-preview',
       contents: input,
       config: {
-        systemInstruction: `FinAI. Saldo: ${summary}. Caixinhas: ${boxesList}. RESPONDA JSON. "advice" PRIMEIRO. Tente sempre extrair "descricao" e "categoria".`,
+        systemInstruction: `FinAI. Saldo: ${summary}. Caixinhas: ${boxesList}. RESPONDA JSON. Dê um "advice" amigável.`,
         responseMimeType: "application/json",
         temperature: 0.1,
         thinkingConfig: { thinkingBudget: 0 }
