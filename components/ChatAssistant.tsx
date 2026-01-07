@@ -207,6 +207,24 @@ const ChatAssistant: React.FC<ChatAssistantProps> = ({ transactions, onConfirm }
                         <input list="cat-list" value={editingTransaction.data.categoria} onChange={e => updateEditingData('categoria', e.target.value)} className="w-full bg-slate-50 border border-slate-200 rounded-xl px-2 py-1.5 font-semibold" placeholder="Ou digite..."/>
                         <datalist id="cat-list">{COMMON_CATEGORIES.map(c => <option key={c} value={c}/>)}</datalist>
                       </div>
+                      <div className="col-span-1">
+                        <label className="text-[10px] font-bold text-slate-500 uppercase mb-1 block flex items-center gap-1"><Clock size={10}/> Data</label>
+                        <input 
+                          type="date" 
+                          value={editingTransaction.data.data} 
+                          onChange={e => updateEditingData('data', e.target.value)} 
+                          className="w-full bg-slate-50 border border-slate-200 rounded-xl px-2 py-1.5 text-slate-700 focus:ring-1 focus:ring-emerald-500"
+                        />
+                      </div>
+                      <div className="col-span-1">
+                        <label className="text-[10px] font-bold text-slate-500 uppercase mb-1 block flex items-center gap-1"><Calendar size={10}/> Vencimento (Opc.)</label>
+                        <input 
+                          type="date" 
+                          value={editingTransaction.data.dataVencimento || ''} 
+                          onChange={e => updateEditingData('dataVencimento', e.target.value)} 
+                          className="w-full bg-slate-50 border border-slate-200 rounded-xl px-2 py-1.5 text-slate-700 focus:ring-1 focus:ring-emerald-500"
+                        />
+                      </div>
                     </div>
                     <div className="flex gap-3">
                       <button onClick={() => confirmTransaction(msg.id)} className="flex-1 bg-emerald-600 text-white py-2.5 rounded-xl flex items-center justify-center gap-2 text-xs font-bold shadow-md"><Check size={16}/> Salvar</button>
