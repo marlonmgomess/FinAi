@@ -1,0 +1,7 @@
+{
+  "name": "FinAI - Assistente Financeiro",
+  "description": "Um gerenciador financeiro pessoal inteligente que permite registrar gastos e ganhos através de conversas naturais via texto ou voz.",
+  "requestFramePermissions": [
+    "microphone"
+  ]
+}
