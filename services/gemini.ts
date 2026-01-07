@@ -1,28 +1,74 @@
 
-import { GoogleGenAI, Type, GenerateContentResponse } from "@google/genai";
+import { GoogleGenAI, Modality, LiveServerMessage } from "@google/genai";
 import { Transaction, TransactionType } from "../types";
 import { storageService } from "./storage";
 
-const getSystemInstruction = (contextSummary: string, boxesList: string) => `
-Você é o FinAI, um assistente financeiro pessoal ultra-rápido.
-CONTEXTO: ${contextSummary}
-CAIXINHAS: ${boxesList}
-
-RESPONDA SEMPRE EM JSON com estes campos:
-{
-  "transaction": { // Opcional, se houver ação financeira
-    "tipo": "criar_caixinha" | "transfer_para_caixinha" | "retirada_da_caixinha" | "despesa" | "receita",
-    "valor": number,
-    "boxNome": string,
-    "meta": number,
-    "emoji": string,
-    "banco": string,
-    "descricao": string,
-    "categoria": string
+// Utilitários de Áudio PCM
+export const audioUtils = {
+  encode: (bytes: Uint8Array) => {
+    let binary = '';
+    for (let i = 0; i < bytes.byteLength; i++) binary += String.fromCharCode(bytes[i]);
+    return btoa(binary);
   },
-  "advice": "Sua resposta amigável aqui" // Obrigatório
-}
-`;
+  decode: (base64: string) => {
+    const binaryString = atob(base64);
+    const bytes = new Uint8Array(binaryString.length);
+    for (let i = 0; i < binaryString.length; i++) bytes[i] = binaryString.charCodeAt(i);
+    return bytes;
+  },
+  decodeAudioData: async (data: Uint8Array, ctx: AudioContext, sampleRate: number): Promise<AudioBuffer> => {
+    const dataInt16 = new Int16Array(data.buffer);
+    const buffer = ctx.createBuffer(1, dataInt16.length, sampleRate);
+    const channelData = buffer.getChannelData(0);
+    for (let i = 0; i < dataInt16.length; i++) channelData[i] = dataInt16[i] / 32768.0;
+    return buffer;
+  }
+};
+
+const getSystemInstruction = (summary: string, boxes: string) => 
+`Você é o FinAI, assistente financeiro de voz. Saldo: ${summary}. Caixinhas: ${boxes}. 
+Seja breve, direto e amigável. Processe transações e responda dúvidas.
+Se o usuário gastar ou receber algo, confirme o valor e categoria.`;
+
+export const connectLiveAssistant = async (
+  history: Transaction[],
+  callbacks: {
+    onAudio: (base64: string) => void;
+    onInterrupted: () => void;
+    onClose: () => void;
+  }
+) => {
+  const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
+  const boxes = await storageService.getBoxes();
+  const income = history.filter(t => t.tipo === TransactionType.INCOME).reduce((acc, t) => acc + t.valor, 0);
+  const expenses = history.filter(t => t.tipo === TransactionType.EXPENSE).reduce((acc, t) => acc + t.valor, 0);
+  const summary = `R$ ${(income - expenses).toFixed(2)}`;
+  const boxesList = boxes.map(b => `${b.nome}: R$ ${b.saldo}`).join(', ');
+
+  return ai.live.connect({
+    model: 'gemini-2.5-flash-native-audio-preview-12-2025',
+    config: {
+      systemInstruction: getSystemInstruction(summary, boxesList),
+      responseModalities: [Modality.AUDIO],
+      speechConfig: {
+        voiceConfig: { prebuiltVoiceConfig: { voiceName: 'Puck' } }
+      }
+    },
+    callbacks: {
+      onopen: () => console.log("Live session opened"),
+      onmessage: async (message: LiveServerMessage) => {
+        if (message.serverContent?.modelTurn?.parts[0]?.inlineData?.data) {
+          callbacks.onAudio(message.serverContent.modelTurn.parts[0].inlineData.data);
+        }
+        if (message.serverContent?.interrupted) {
+          callbacks.onInterrupted();
+        }
+      },
+      onclose: callbacks.onClose,
+      onerror: (e) => console.error("Live error:", e)
+    }
+  });
+};
 
 export const processFinancialInputStreaming = async (
   input: string, 
@@ -34,42 +80,30 @@ export const processFinancialInputStreaming = async (
     const boxes = await storageService.getBoxes();
     const income = history.filter(t => t.tipo === TransactionType.INCOME).reduce((acc, t) => acc + t.valor, 0);
     const expenses = history.filter(t => t.tipo === TransactionType.EXPENSE).reduce((acc, t) => acc + t.valor, 0);
-    
-    const summary = `Saldo: R$ ${(income - expenses).toFixed(2)}`;
+    const summary = `R$ ${(income - expenses).toFixed(2)}`;
     const boxesList = boxes.map(b => `${b.nome}: R$ ${b.saldo}`).join(', ');
 
     const result = await ai.models.generateContentStream({
       model: 'gemini-3-flash-preview',
       contents: input,
       config: {
-        systemInstruction: getSystemInstruction(summary, boxesList),
+        systemInstruction: `FinAI: Saldo: ${summary}. Caixinhas: ${boxesList}. RESPONDA JSON. "advice" PRIMEIRO.`,
         responseMimeType: "application/json",
-        thinkingConfig: { thinkingBudget: 0 } // Prioriza velocidade total
+        temperature: 0.1,
+        thinkingConfig: { thinkingBudget: 0 }
       },
     });
 
     let fullResponse = "";
     for await (const chunk of result) {
-      const text = chunk.text;
-      if (text) {
-        fullResponse += text;
-        // Tenta extrair apenas o conteúdo do campo "advice" para streaming amigável
-        try {
-          // Busca o valor entre as aspas do campo "advice"
-          const adviceMatch = fullResponse.match(/"advice":\s*"(.*?)(?:"|$)/s);
-          if (adviceMatch && adviceMatch[1]) {
-            // Remove escapes de nova linha do JSON para o display
-            onChunk(adviceMatch[1].replace(/\\n/g, '\n').replace(/\\"/g, '"'));
-          }
-        } catch (e) {
-          // Se falhar a extração parcial, espera o fim
-        }
+      if (chunk.text) {
+        fullResponse += chunk.text;
+        const match = fullResponse.match(/"advice":\s*"(.*?)(?:"|$)/s);
+        if (match && match[1]) onChunk(match[1].replace(/\\n/g, '\n').replace(/\\"/g, '"'));
       }
     }
-
     return JSON.parse(fullResponse.trim());
   } catch (error) {
-    console.error("Erro no streaming Gemini:", error);
     return null;
   }
 };
