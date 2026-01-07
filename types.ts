@@ -6,13 +6,20 @@ export enum TransactionType {
   WITHDRAW_FROM_BOX = 'retirada_da_caixinha'
 }
 
+export interface UserProfile {
+  nome: string;
+  isPremium: boolean;
+  moeda: string;
+  limiteCaixinhasGratis: number;
+}
+
 export interface Box {
   id: string;
   nome: string;
   meta: number;
   saldo: number;
   emoji: string;
-  banco?: string; // Novo campo para identificar o banco
+  banco?: string;
   createdAt: number;
 }
 
@@ -25,7 +32,7 @@ export interface Transaction {
   dataVencimento?: string;
   descricao: string;
   createdAt: number;
-  boxId?: string; // ID da caixinha se for uma transferência
+  boxId?: string;
 }
 
 export interface AIProcessedTransaction {
@@ -35,10 +42,10 @@ export interface AIProcessedTransaction {
   data: string;
   dataVencimento?: string;
   descricao: string;
-  boxNome?: string; // Nome da caixinha se a IA detectar intenção de investimento
-  meta?: number;    // Meta se for criação de caixinha
-  emoji?: string;   // Emoji sugerido
-  banco?: string;   // Banco sugerido
+  boxNome?: string;
+  meta?: number;
+  emoji?: string;
+  banco?: string;
 }
 
 export interface Message {
@@ -47,19 +54,4 @@ export interface Message {
   content: string;
   timestamp: number;
   pendingTransaction?: AIProcessedTransaction;
-  pendingBoxAction?: {
-    type: 'create' | 'deposit' | 'withdraw';
-    boxNome: string;
-    valor?: number;
-    meta?: number;
-  };
-}
-
-export interface DashboardStats {
-  totalBalance: number;
-  totalIncome: number;
-  totalExpenses: number;
-  totalInvested: number;
-  categoryDistribution: { name: string; value: number }[];
-  monthlyTrend: { name: string; expenses: number; income: number }[];
 }

@@ -1,8 +1,8 @@
 
 import React, { useMemo } from 'react';
 import { Transaction, TransactionType } from '../types';
-import { TrendingUp, TrendingDown, Wallet, PieChart as PieChartIcon } from 'lucide-react';
-import { PieChart, Pie, Cell, ResponsiveContainer, BarChart, Bar, XAxis, YAxis, Tooltip, Legend } from 'recharts';
+import { TrendingUp, TrendingDown, Wallet, PieChart as PieChartIcon, Smartphone, Share, MoreVertical } from 'lucide-react';
+import { PieChart, Pie, Cell, ResponsiveContainer, Tooltip } from 'recharts';
 
 interface DashboardProps {
   transactions: Transaction[];
@@ -16,7 +16,6 @@ const Dashboard: React.FC<DashboardProps> = ({ transactions }) => {
     const expenses = transactions.filter(t => t.tipo === TransactionType.EXPENSE).reduce((acc, t) => acc + t.valor, 0);
     const balance = income - expenses;
 
-    // Category distribution
     const catMap: Record<string, number> = {};
     transactions.filter(t => t.tipo === TransactionType.EXPENSE).forEach(t => {
       catMap[t.categoria] = (catMap[t.categoria] || 0) + t.valor;
@@ -31,7 +30,7 @@ const Dashboard: React.FC<DashboardProps> = ({ transactions }) => {
   };
 
   return (
-    <div className="space-y-6">
+    <div className="space-y-6 pb-8">
       {/* Balance Card */}
       <div className="bg-gradient-to-br from-slate-800 to-slate-900 rounded-2xl p-6 text-white shadow-xl relative overflow-hidden">
         <div className="absolute top-0 right-0 w-32 h-32 bg-white/10 rounded-full -mr-16 -mt-16 blur-3xl"></div>
@@ -95,14 +94,6 @@ const Dashboard: React.FC<DashboardProps> = ({ transactions }) => {
               </div>
             )}
           </div>
-          <div className="mt-4 flex flex-wrap gap-2 justify-center">
-             {stats.categoryData.slice(0, 4).map((cat, i) => (
-               <div key={cat.name} className="flex items-center gap-1 px-2 py-1 rounded bg-slate-50 border border-slate-100">
-                 <div className="w-2 h-2 rounded-full" style={{ backgroundColor: COLORS[i % COLORS.length] }}></div>
-                 <span className="text-[10px] font-medium text-slate-600">{cat.name}</span>
-               </div>
-             ))}
-          </div>
         </div>
 
         <div className="bg-white p-6 rounded-2xl border border-slate-200 shadow-sm">
@@ -121,12 +112,34 @@ const Dashboard: React.FC<DashboardProps> = ({ transactions }) => {
               <p className="text-xs text-blue-600 font-semibold mb-1 uppercase">Dica do Assistente</p>
               <p className="text-xs text-blue-800 leading-relaxed">
                 {stats.expenses > stats.income 
-                  ? "Suas despesas superaram suas receitas este mês. Tente reduzir gastos variáveis." 
-                  : stats.income === 0 
-                  ? "Adicione seu primeiro ganho ou gasto falando com o FinAI!"
-                  : "Parabéns! Você está economizando parte da sua renda. Continue assim!"}
+                  ? "Cuidado! Seus gastos estão altos este mês." 
+                  : "Ótimo trabalho mantendo as contas em dia!"}
               </p>
             </div>
+          </div>
+        </div>
+      </div>
+
+      {/* Guia de Instalação PWA */}
+      <div className="bg-slate-100/50 rounded-2xl p-5 border border-dashed border-slate-300">
+        <div className="flex items-center gap-2 mb-3">
+          <Smartphone size={18} className="text-slate-500" />
+          <h3 className="text-sm font-bold text-slate-700">Como instalar no seu celular?</h3>
+        </div>
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+          <div className="bg-white p-3 rounded-xl shadow-sm border border-slate-200">
+            <p className="text-[10px] font-black text-blue-600 uppercase mb-1">Android (Chrome)</p>
+            <ol className="text-[11px] text-slate-600 space-y-1 list-decimal ml-4">
+              <li>Toque nos <MoreVertical size={10} className="inline" /> 3 pontinhos no topo.</li>
+              <li>Toque em <b>"Instalar aplicativo"</b>.</li>
+            </ol>
+          </div>
+          <div className="bg-white p-3 rounded-xl shadow-sm border border-slate-200">
+            <p className="text-[10px] font-black text-rose-600 uppercase mb-1">iPhone (Safari)</p>
+            <ol className="text-[11px] text-slate-600 space-y-1 list-decimal ml-4">
+              <li>Toque no botão de <Share size={10} className="inline" /> <b>Compartilhar</b>.</li>
+              <li>Role e toque em <b>"Adicionar à Tela de Início"</b>.</li>
+            </ol>
           </div>
         </div>
       </div>
