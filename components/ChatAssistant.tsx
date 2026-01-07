@@ -1,7 +1,8 @@
 
 import React, { useState, useRef, useEffect, useCallback } from 'react';
-import { Send, Mic, MicOff, Check, X, Bot, User, Calendar, Clock, Tag, Headset, Sparkles } from 'lucide-react';
+import { Send, Mic, MicOff, Check, X, Bot, User, Calendar, Clock, Tag, Headset, Sparkles, Bell } from 'lucide-react';
 import { processFinancialInput } from '../services/gemini';
+import { notificationService } from '../services/notifications';
 import { Message, AIProcessedTransaction, TransactionType, Transaction } from '../types';
 
 interface ChatAssistantProps {
@@ -69,6 +70,11 @@ const ChatAssistant: React.FC<ChatAssistantProps> = ({ transactions, onConfirm }
   useEffect(() => {
     if (scrollRef.current) scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
   }, [messages, isProcessing]);
+
+  useEffect(() => {
+    // Ao abrir o chat, solicita permissão de notificação para garantir os lembretes
+    notificationService.requestPermission();
+  }, []);
 
   const handleSendMessage = useCallback(async (text?: string) => {
     const content = text || inputValue.trim();
@@ -146,7 +152,12 @@ const ChatAssistant: React.FC<ChatAssistantProps> = ({ transactions, onConfirm }
   const confirmTransaction = (messageId: string) => {
     if (editingTransaction && editingTransaction.id === messageId) {
       onConfirm(editingTransaction.data);
-      setMessages(prev => prev.map(m => m.id === messageId ? { ...m, pendingTransaction: undefined, content: 'Registrado com sucesso! ✅' } : m));
+      
+      const successMsg = editingTransaction.data.dataVencimento 
+        ? 'Registrado! Vou te avisar um dia antes do vencimento. 🔔' 
+        : 'Registrado com sucesso! ✅';
+
+      setMessages(prev => prev.map(m => m.id === messageId ? { ...m, pendingTransaction: undefined, content: successMsg } : m));
       setEditingTransaction(null);
     }
   };
@@ -226,6 +237,14 @@ const ChatAssistant: React.FC<ChatAssistantProps> = ({ transactions, onConfirm }
                         />
                       </div>
                     </div>
+
+                    {editingTransaction.data.dataVencimento && (
+                      <div className="flex items-center gap-2 p-2 bg-amber-50 rounded-lg border border-amber-100">
+                        <Bell size={14} className="text-amber-600" />
+                        <span className="text-[10px] text-amber-700 font-medium italic">Lembrete automático agendado para 24h antes.</span>
+                      </div>
+                    )}
+
                     <div className="flex gap-3">
                       <button onClick={() => confirmTransaction(msg.id)} className="flex-1 bg-emerald-600 text-white py-2.5 rounded-xl flex items-center justify-center gap-2 text-xs font-bold shadow-md"><Check size={16}/> Salvar</button>
                       <button onClick={() => setEditingTransaction(null)} className="flex-1 bg-slate-100 text-slate-500 py-2.5 rounded-xl flex items-center justify-center gap-2 text-xs font-bold"><X size={16}/> Cancelar</button>

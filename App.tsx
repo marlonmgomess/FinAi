@@ -6,6 +6,7 @@ import ChatAssistant from './components/ChatAssistant';
 import TransactionList from './components/TransactionList';
 import Navbar from './components/Navbar';
 import { storageService } from './services/storage';
+import { notificationService } from './services/notifications';
 import { Transaction } from './types';
 
 const App: React.FC = () => {
@@ -17,15 +18,27 @@ const App: React.FC = () => {
     const data = await storageService.getTransactions();
     setTransactions(data);
     setLoading(false);
+    
+    // Verificar se há lembretes pendentes para as transações carregadas
+    notificationService.checkDueReminders(data);
   };
 
   useEffect(() => {
     fetchTransactions();
+    // Solicitar permissão de notificação silenciosamente se possível
+    if ("Notification" in window && Notification.permission === "default") {
+      // Deixamos para o ChatAssistant pedir no momento certo para melhor UX
+    }
   }, []);
 
   const handleAddTransaction = async (t: Omit<Transaction, 'id' | 'createdAt'>) => {
-    await storageService.saveTransaction(t);
+    const newTx = await storageService.saveTransaction(t);
     await fetchTransactions();
+    
+    // Se tiver vencimento, agenda o lembrete
+    if (newTx.dataVencimento) {
+      notificationService.scheduleReminder(newTx);
+    }
   };
 
   const handleDeleteTransaction = async (id: string) => {
